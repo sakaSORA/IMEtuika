@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Gboard Dict Editor (Zip Support)</title>
+    
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#4285f4">
+    <link rel="apple-touch-icon" href="icon-192.png">
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <style>
+        :root { --reg-bg: #fff4e6; --reg-text: #855d21; --list-bg: #e7f3ff; --list-text: #2c4a6e; --primary: #4285f4; --success: #34a853; --danger: #ea4335; }
+        body { font-family: sans-serif; background: #fdfdfd; margin: 0; padding: 0; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+        header { background: white; padding: 12px 16px; border-bottom: 1px solid #eee; position: sticky; top: 0; z-index: 100; flex-shrink: 0; }
+        #status { text-align: center; font-size: 0.85rem; padding-bottom: 10px; font-weight: bold; min-height: 1.2em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .header-btns { display: flex; gap: 10px; }
+        .tab-menu { display: flex; background: #eee; flex-shrink: 0; }
+        .tab-btn { flex: 1; padding: 16px; border: none; font-weight: bold; cursor: pointer; font-size: 1rem; border-bottom: 4px solid transparent; outline: none; transition: 0.2s; }
+        #tab-reg { background-color: #ffe8cc; color: #a6732e; }
+        #tab-reg.active { background-color: var(--reg-bg); color: var(--reg-text); border-bottom-color: #ffa94d; }
+        #tab-list { background-color: #d0ebff; color: #4dabf7; }
+        #tab-list.active { background-color: var(--list-bg); color: var(--list-text); border-bottom-color: #4dabf7; }
+        .content { flex: 1; overflow-y: auto; padding: 16px; transition: background-color 0.3s; -webkit-overflow-scrolling: touch; }
+        .content.reg-mode { background-color: var(--reg-bg); }
+        .content.list-mode { background-color: var(--list-bg); }
+        .page { display: none; }
+        .page.active { display: block; }
+        .card { background: white; padding: 20px; border-radius: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); margin-bottom: 16px; }
+        .field { margin-bottom: 15px; }
+        label { display: block; font-size: 0.85rem; font-weight: bold; margin-bottom: 6px; }
+        input, select { width: 100%; padding: 14px; border: 2px solid #eee; border-radius: 10px; font-size: 1rem; box-sizing: border-box; outline: none; appearance: none; -webkit-appearance: none; }
+        input:focus { border-color: var(--primary); }
+        .btn { width: 100%; padding: 15px; border: none; border-radius: 12px; font-weight: bold; cursor: pointer; font-size: 1rem; transition: opacity 0.2s; }
+        .btn:active { opacity: 0.7; }
+        .btn-main { background: var(--primary); color: white; }
+        .btn-outline { background: #6c757d; color: white; }
+        .btn-add { background: var(--success); color: white; margin-top: 10px; }
+        button:disabled { opacity: 0.4; cursor: not-allowed; }
+        .list-item { background: white; padding: 14px; border-radius: 12px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; border: 1px solid #dee2e6; }
+        .item-info { flex: 1; overflow: hidden; }
+        .item-info strong { display: block; overflow: hidden; text-overflow: ellipsis; }
+        .btn-small { padding: 10px 14px; border-radius: 8px; font-size: 0.85rem; border: none; color: white; font-weight: bold; margin-left: 5px; flex-shrink: 0; }
+        .btn-edit { background: var(--primary); }
+        .btn-del { background: var(--danger); }
+    </style>
+</head>
+<body>
+
+<header>
+    <div id="status">辞書ファイル(.txt/.zip)を開いてください</div>
+    <div class="header-btns">
+        <button id="btnOpen" class="btn btn-outline" style="margin:0; flex:1;">開く</button>
+        <button id="btnSave" class="btn btn-main" style="margin:0; flex:1;" disabled>保存</button>
+    </div>
+</header>
+
+<div class="tab-menu">
+    <button id="tab-reg" class="tab-btn active">新規登録</button>
+    <button id="tab-list" class="tab-btn">一覧・修正</button>
+</div>
+
+<div id="main-content" class="content reg-mode">
+    <div id="page-reg" class="page active">
+        <div class="card">
+            <div class="field"><label>よみ</label><input type="text" id="shortcut" placeholder="ふうが" spellcheck="false"></div>
+            <div class="field"><label>単語</label><input type="text" id="word" placeholder="楓雅" spellcheck="false"></div>
+            <div class="field"><label>言語</label><select id="lang"><option value="ja-JP">ja-JP</option></select></div>
+            <div class="field">
+                <label>品詞</label>
+                <select id="pos">
+                    <option value="名">名詞</option><option value="固">固有名詞</option>
+                    <option value="姓">姓</option><option value="名">名</option><option value="地">地名</option>
+                </select>
+            </div>
+            <button id="btnAdd" class="btn btn-add" disabled>リストに追加</button>
+        </div>
+    </div>
+    <div id="page-list" class="page">
+        <div id="wordList"></div>
+    </div>
+</div>
+
+<script>
+    // PWA Service Worker Registration
+    if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+            navigator.serviceWorker.register('./sw.js')
+                .then(reg => console.log('SW registered.', reg))
+                .catch(err => console.log('SW registration failed.', err));
+        });
+    }
+
+    let fileHandle = null;
+    let dictionaryData = [];
+    let headerLines = "";
+    let isZipFile = false;
+
+    const elements = {
+        btnOpen: document.getElementById('btnOpen'),
+        btnSave: document.getElementById('btnSave'),
+        btnAdd: document.getElementById('btnAdd'),
+        tabReg: document.getElementById('tab-reg'),
+        tabList: document.getElementById('tab-list'),
+        pageReg: document.getElementById('page-reg'),
+        pageList: document.getElementById('page-list'),
+        mainContent: document.getElementById('main-content'),
+        wordList: document.getElementById('wordList'),
+        status: document.getElementById('status'),
+        inputS: document.getElementById('shortcut'),
+        inputW: document.getElementById('word'),
+        inputL: document.getElementById('lang'),
+        inputP: document.getElementById('pos')
+    };
+
+    function switchTab(tabName) {
+        elements.pageReg.classList.toggle('active', tabName === 'reg');
+        elements.pageList.classList.toggle('active', tabName === 'list');
+        elements.tabReg.classList.toggle('active', tabName === 'reg');
+        elements.tabList.classList.toggle('active', tabName === 'list');
+        if (tabName === 'reg') {
+            elements.mainContent.className = 'content reg-mode';
+        } else {
+            elements.mainContent.className = 'content list-mode';
+            renderList();
+        }
+    }
+
+    elements.tabReg.addEventListener('click', () => switchTab('reg'));
+    elements.tabList.addEventListener('click', () => switchTab('list'));
+
+    elements.btnOpen.addEventListener('click', async () => {
+        try {
+            [fileHandle] = await window.showOpenFilePicker({ 
+                types: [
+                    { 
+                        description: 'Gboard Dictionary Files', 
+                        accept: {
+                            'text/plain': ['.txt'],
+                            'application/zip': ['.zip']
+                        } 
+                    }
+                ] 
+            });
+            const file = await fileHandle.getFile();
+            let text = "";
+
+            if (file.name.endsWith('.zip')) {
+                isZipFile = true;
+                const zip = await JSZip.loadAsync(file);
+                const txtFile = Object.values(zip.files).find(f => f.name.endsWith('.txt'));
+                if (!txtFile) throw new Error("Zip内にテキストファイルが見つかりません");
+                text = await txtFile.async("string");
+            } else {
+                isZipFile = false;
+                text = await file.text();
+            }
+            
+            parseDictionary(text);
+            renderList();
+            elements.btnSave.disabled = false;
+            elements.btnAdd.disabled = false;
+            showStatus(`読込: ${file.name}`, "var(--success)");
+        } catch (e) {
+            console.error(e);
+            if (e.name !== 'AbortError') showStatus(e.message || "読込に失敗しました", "var(--danger)");
+        }
+    });
+
+    function parseDictionary(text) {
+        const lines = text.split(/\r?\n/);
+        dictionaryData = [];
+        headerLines = "";
+        lines.forEach(line => {
+            if (line.startsWith('#') || !line.trim()) {
+                headerLines += line + "\n";
+            } else {
+                const parts = line.split('\t');
+                if(parts.length >= 2) {
+                    dictionaryData.push({s: parts[0], w: parts[1], l: parts[2]||"ja-JP", p: parts[3]||"名"});
+                }
+            }
+        });
+    }
+
+    function renderList() {
+        elements.wordList.innerHTML = dictionaryData.length ? "" : "<p style='text-align:center; color:#999; padding:20px;'>登録データがありません</p>";
+        dictionaryData.forEach((item, i) => {
+            const div = document.createElement('div');
+            div.className = 'list-item';
+            div.innerHTML = `
+                <div class="item-info"><strong>${escapeHtml(item.w)}</strong><small>${escapeHtml(item.s)} [${escapeHtml(item.p)}]</small></div>
+                <div class="item-actions">
+                    <button class="btn-small btn-edit" data-index="${i}">修正</button>
+                    <button class="btn-small btn-del" data-index="${i}">削除</button>
+                </div>`;
+            elements.wordList.appendChild(div);
+        });
+    }
+
+    elements.wordList.addEventListener('click', (e) => {
+        const index = e.target.dataset.index;
+        if (index === undefined) return;
+        if (e.target.classList.contains('btn-edit')) {
+            editItem(parseInt(index));
+        } else if (e.target.classList.contains('btn-del')) {
+            deleteItem(parseInt(index));
+        }
+    });
+
+    elements.btnAdd.addEventListener('click', () => {
+        const s = elements.inputS.value.trim();
+        const w = elements.inputW.value.trim();
+        const l = elements.inputL.value;
+        const p = elements.inputP.value;
+        if(!s || !w) { alert("入力を確認してください"); return; }
+        if(dictionaryData.some(item => item.s === s && item.w === w)) {
+            showStatus("⚠️ 重複しています", "var(--danger)");
+            return;
+        }
+        dictionaryData.push({s, w, l, p});
+        elements.inputS.value = "";
+        elements.inputW.value = "";
+        showStatus("リストに追加しました", "#f08c00");
+    });
+
+    function deleteItem(i) {
+        if(confirm("削除しますか？")) {
+            dictionaryData.splice(i, 1);
+            renderList();
+            showStatus("削除しました", "#f08c00");
+        }
+    }
+
+    function editItem(i) {
+        const item = dictionaryData[i];
+        elements.inputS.value = item.s;
+        elements.inputW.value = item.w;
+        elements.inputL.value = item.l;
+        elements.inputP.value = item.p;
+        dictionaryData.splice(i, 1);
+        switchTab('reg');
+        showStatus("修正モード中", "var(--primary)");
+    }
+
+    elements.btnSave.addEventListener('click', async () => {
+        try {
+            const out = headerLines.trim() + "\n" + dictionaryData.map(item => `${item.s}\t${item.w}\t${item.l}\t${item.p}`).join('\n') + "\n";
+            let targetHandle = fileHandle;
+
+            if (isZipFile) {
+                targetHandle = await window.showSaveFilePicker({
+                    suggestedName: 'dictionary.txt',
+                    types: [{ description: 'Text File', accept: {'text/plain': ['.txt']} }]
+                });
+            }
+
+            const writable = await targetHandle.createWritable();
+            await writable.write(out);
+            await writable.close();
+            showStatus("✅ 保存完了しました", "var(--primary)");
+        } catch (e) { 
+            if (e.name !== 'AbortError') showStatus("保存に失敗しました", "var(--danger)");
+        }
+    });
+
+    function showStatus(msg, color) {
+        elements.status.textContent = msg;
+        elements.status.style.color = color;
+    }
+
+    function escapeHtml(str) {
+        const div = document.createElement('div');
+        div.textContent = str;
+        return div.innerHTML;
+    }
+</script>
+</body>
+</html>
