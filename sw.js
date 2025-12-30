@@ -1,5 +1,5 @@
 // バージョン管理：更新時は v1 を v2 などに変更してください
-const CACHE_NAME = 'app-v3';
+const CACHE_NAME = 'app-v4';
 
 // キャッシュするファイルのリスト（アイコンを確実に入れます）
 const ASSETS_TO_CACHE = [
